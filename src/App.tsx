@@ -20,7 +20,8 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { 
   getFirestore, collection, doc, addDoc, updateDoc, 
-  deleteDoc, onSnapshot, query, orderBy, setDoc, enableIndexedDbPersistence 
+  deleteDoc, onSnapshot, query, orderBy, setDoc, enableIndexedDbPersistence,
+  serverTimestamp
 } from 'firebase/firestore';
 
 // Note: In a real applet environment, firebase-applet-config.json would be used.
@@ -73,6 +74,7 @@ const INITIAL_LECTURES_SEED = [
     colorTheme: 'Sky',
     bgColor: "bg-sky-50",
     pathColor: "stroke-sky-400",
+    pathData: "M 50 350 C 150 200, 250 500, 350 400 C 450 300, 550 100, 650 250 C 750 400, 850 550, 950 450",
     createdAt: Date.now(),
     nodes: [
       { id: 'n1', type: 'vocab', label: 'Từ Vựng', icon: 'book', top: 45, left: 15, content: [{ id: 1, word: 'Lion', ipa: '/ˈlaɪ.ən/', meaning: 'Sư tử', example: 'The lion is the king of the jungle.', image: '🦁' }] },
@@ -85,7 +87,7 @@ const INITIAL_LECTURES_SEED = [
 
 // --- COMPONENTS ---
 
-const AuthScreen = ({ onLogin, isConnecting }) => (
+const AuthScreen = ({ onLogin, isConnecting, isAdminPath }) => (
   <div className="flex flex-col items-center justify-center h-screen bg-sky-400 relative overflow-hidden">
     {/* Decorative Clouds */}
     <motion.div animate={{ x: [0, 50, 0] }} transition={{ duration: 10, repeat: Infinity }} className="absolute top-20 left-10 text-white/40"><Cloud size={100} fill="currentColor" /></motion.div>
@@ -100,7 +102,9 @@ const AuthScreen = ({ onLogin, isConnecting }) => (
         <GraduationCap size={50} />
       </div>
       <h1 className="text-4xl font-black text-sky-600 mb-2 tracking-tight">English Adventure</h1>
-      <p className="text-slate-500 mb-10 font-medium text-lg">Học tiếng Anh thật vui!</p>
+      <p className="text-slate-500 mb-10 font-medium text-lg">
+        {isAdminPath ? "Chế độ Quản trị viên" : "Học tiếng Anh thật vui!"}
+      </p>
       
       {isConnecting ? (
         <div className="flex flex-col items-center gap-4">
@@ -109,40 +113,46 @@ const AuthScreen = ({ onLogin, isConnecting }) => (
         </div>
       ) : (
         <div className="space-y-4">
-          <button 
-            onClick={() => onLogin('student')}
-            className="w-full group flex items-center gap-4 p-5 bg-sky-500 hover:bg-sky-600 text-white rounded-2xl transition-all shadow-lg hover:shadow-sky-200 transform hover:-translate-y-1"
-          >
-            <div className="p-3 bg-white/20 rounded-xl"><User size={28} /></div>
-            <div className="text-left">
-              <span className="block font-black text-xl">Bắt Đầu Học</span>
-              <span className="text-sm opacity-80">Dành cho học sinh</span>
-            </div>
-          </button>
-          
-          <button 
-            onClick={() => onLogin('admin')}
-            className="w-full group flex items-center gap-4 p-5 bg-white border-4 border-slate-100 hover:border-sky-400 rounded-2xl transition-all"
-          >
-            <div className="p-3 bg-slate-100 rounded-xl text-slate-500 group-hover:text-sky-500"><Shield size={28} /></div>
-            <div className="text-left">
-              <span className="block font-bold text-slate-700 text-lg">Giáo Viên</span>
-              <span className="text-sm text-slate-400">Quản lý bài học</span>
-            </div>
-          </button>
+          {!isAdminPath ? (
+            <button 
+              onClick={() => onLogin('student')}
+              className="w-full group flex items-center gap-4 p-5 bg-sky-500 hover:bg-sky-600 text-white rounded-2xl transition-all shadow-lg hover:shadow-sky-200 transform hover:-translate-y-1"
+            >
+              <div className="p-3 bg-white/20 rounded-xl"><User size={28} /></div>
+              <div className="text-left">
+                <span className="block font-black text-xl">Bắt Đầu Học</span>
+                <span className="text-sm opacity-80">Dành cho học sinh</span>
+              </div>
+            </button>
+          ) : (
+            <>
+              <button 
+                onClick={() => onLogin('admin')}
+                className="w-full group flex items-center gap-4 p-5 bg-purple-500 hover:bg-purple-600 text-white rounded-2xl transition-all shadow-lg hover:shadow-purple-200 transform hover:-translate-y-1"
+              >
+                <div className="p-3 bg-white/20 rounded-xl"><Shield size={28} /></div>
+                <div className="text-left">
+                  <span className="block font-black text-xl uppercase">Giáo Viên</span>
+                  <span className="text-sm opacity-80">Quản lý bài học</span>
+                </div>
+              </button>
+              <a href="/" className="inline-block mt-4 text-slate-400 font-bold hover:text-sky-500 transition underline decoration-2 underline-offset-4">Quay lại trang học sinh</a>
+            </>
+          )}
         </div>
       )}
     </motion.div>
   </div>
 );
 
-const GameMap = ({ lecture, onNodeClick, isAdmin, isStructureMode, onUpdateLecture, onNodeDragEnd }) => {
+const GameMap = ({ lecture, onNodeClick, isAdmin, isStructureMode, onUpdateLecture, onNodeDragEnd, onDeleteNode }) => {
   const mapRef = useRef(null);
   const [draggingId, setDraggingId] = useState(null);
   const [tempPos, setTempPos] = useState(null); 
   const [isDragging, setIsDragging] = useState(false);
 
-  const pathD = "M 50 350 C 150 200, 250 500, 350 400 C 450 300, 550 100, 650 250 C 750 400, 850 550, 950 450";
+  const defaultPath = "M 50 350 C 150 200, 250 500, 350 400 C 450 300, 550 100, 650 250 C 750 400, 850 550, 950 450";
+  const pathD = lecture.pathData || defaultPath;
 
   const getIcon = (iconName) => {
     const found = AVAILABLE_ICONS.find(i => i.id === iconName);
@@ -200,7 +210,7 @@ const GameMap = ({ lecture, onNodeClick, isAdmin, isStructureMode, onUpdateLectu
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           className="text-5xl font-black text-slate-800 tracking-tight drop-shadow-sm" 
-          contentEditable={isAdmin}
+          contentEditable={isAdmin && isStructureMode}
           suppressContentEditableWarning={true}
           onBlur={(e) => isAdmin && onUpdateLecture('title', e.target.innerText)}
         >
@@ -211,7 +221,7 @@ const GameMap = ({ lecture, onNodeClick, isAdmin, isStructureMode, onUpdateLectu
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.2 }}
           className="text-xl font-bold text-slate-500 mt-2 bg-white/50 inline-block px-4 py-1 rounded-full backdrop-blur-sm"
-          contentEditable={isAdmin}
+          contentEditable={isAdmin && isStructureMode}
           suppressContentEditableWarning={true}
           onBlur={(e) => isAdmin && onUpdateLecture('subTitle', e.target.innerText)}
         >
@@ -247,9 +257,28 @@ const GameMap = ({ lecture, onNodeClick, isAdmin, isStructureMode, onUpdateLectu
             onMouseDown={(e) => handleMouseDown(e, node.id)}
             onClick={(e) => {
               e.stopPropagation();
-              if (!isDragging) onNodeClick(node);
+              if (isDragging) return;
+              
+              if (isAdmin && isStructureMode) {
+                onNodeClick(node, true); // Pass true to indicate edit mode
+              } else {
+                onNodeClick(node);
+              }
             }}
           >
+            {/* Quick Delete Button in Structure Mode */}
+            {isStructureMode && (
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteNode(node.id);
+                }}
+                className="absolute -top-4 -right-4 bg-red-500 text-white p-1.5 rounded-full shadow-lg z-40 hover:bg-red-600 transition-colors"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+
             {/* Island Base */}
             <div className="absolute -bottom-2 w-24 h-8 bg-black/5 rounded-[100%] blur-md"></div>
             
@@ -510,6 +539,420 @@ const SummaryModule = ({ lecture, onClose }) => {
   );
 };
 
+const PathEditorModal = ({ pathData, onSave, onClose }) => {
+  const [localPath, setLocalPath] = useState(pathData || "");
+  const presets = [
+    { name: "Sóng lượn", data: "M 50 350 C 150 200, 250 500, 350 400 C 450 300, 550 100, 650 250 C 750 400, 850 550, 950 450" },
+    { name: "Ziczac", data: "M 50 500 L 250 100 L 450 500 L 650 100 L 850 500" },
+    { name: "Đường thẳng", data: "M 50 300 L 950 300" },
+    { name: "Vòng cung", data: "M 50 500 Q 500 0 950 500" }
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fadeIn">
+      <div className="bg-white rounded-3xl p-8 w-full max-w-lg shadow-2xl border-4 border-white">
+        <h3 className="text-3xl font-black mb-6 text-slate-800 flex items-center gap-2"><MapIcon className="text-sky-500"/> Sửa Đường Đua</h3>
+        
+        <div className="space-y-6">
+          <div>
+            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Mẫu có sẵn</label>
+            <div className="grid grid-cols-2 gap-3">
+              {presets.map(p => (
+                <button 
+                  key={p.name} 
+                  onClick={() => setLocalPath(p.data)}
+                  className={`px-4 py-3 rounded-2xl font-bold text-sm transition-all border-2 ${localPath === p.data ? 'bg-sky-500 text-white border-sky-600 shadow-lg' : 'bg-slate-50 text-slate-600 border-slate-100 hover:border-sky-200'}`}
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Mã đường đi (SVG Path)</label>
+            <textarea 
+              className="w-full border-4 border-slate-100 p-4 rounded-2xl focus:border-sky-400 outline-none font-mono text-xs text-slate-500 bg-slate-50" 
+              rows={4} 
+              value={localPath} 
+              onChange={e => setLocalPath(e.target.value)}
+              placeholder="M 0 0 C ..."
+            />
+          </div>
+        </div>
+
+        <div className="mt-8 flex gap-3">
+          <button onClick={onClose} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black hover:bg-slate-200 transition">HỦY</button>
+          <button onClick={() => onSave(localPath)} className="flex-[2] py-4 bg-sky-500 text-white rounded-2xl font-black hover:bg-sky-600 shadow-xl transition">LƯU ĐƯỜNG ĐUA</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AddNodeModal = ({ onSave, onClose }) => {
+  const [label, setLabel] = useState("");
+  const [type, setType] = useState("vocab");
+  const [icon, setIcon] = useState("book");
+
+  const nodeTypes = [
+    { id: 'vocab', name: 'Từ Vựng', desc: 'Học từ qua Flashcard' },
+    { id: 'video', name: 'Video', desc: 'Xem bài giảng video' },
+    { id: 'game1', name: 'Trò Chơi', desc: 'Luyện tập vui nhộn' },
+    { id: 'summary', name: 'Tổng Kết', desc: 'Về đích & Khen thưởng' },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fadeIn">
+      <div className="bg-white rounded-[40px] p-8 w-full max-w-xl shadow-3xl border-8 border-white">
+        <h3 className="text-4xl font-black mb-8 text-slate-800 flex items-center gap-3">
+          <div className="p-3 bg-purple-100 rounded-2xl text-purple-500"><Plus size={32} strokeWidth={3}/></div>
+          Thêm Trạm Mới
+        </h3>
+        
+        <div className="space-y-8">
+          {/* Tên trạm */}
+          <div>
+            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Tên trạm học tập</label>
+            <input 
+              autoFocus
+              className="w-full border-4 border-slate-100 p-5 rounded-3xl focus:border-purple-400 outline-none font-bold text-xl text-slate-700 bg-slate-50 transition-all" 
+              value={label} 
+              onChange={e => setLabel(e.target.value)}
+              placeholder="Ví dụ: Khởi động, Luyện tập..."
+            />
+          </div>
+
+          {/* Loại trạm */}
+          <div>
+            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Loại hoạt động</label>
+            <div className="grid grid-cols-2 gap-3">
+              {nodeTypes.map(t => (
+                <button 
+                  key={t.id} 
+                  onClick={() => setType(t.id)}
+                  className={`p-4 rounded-3xl text-left transition-all border-4 ${type === t.id ? 'bg-purple-500 border-purple-600 shadow-lg' : 'bg-slate-50 border-slate-100 hover:border-purple-200'}`}
+                >
+                  <div className={`font-black text-lg ${type === t.id ? 'text-white' : 'text-slate-700'}`}>{t.name}</div>
+                  <div className={`text-xs font-bold ${type === t.id ? 'text-purple-100' : 'text-slate-400'}`}>{t.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Chọn Icon */}
+          <div>
+            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Chọn biểu tượng</label>
+            <div className="flex flex-wrap gap-3 p-4 bg-slate-50 rounded-3xl border-4 border-slate-100">
+              {AVAILABLE_ICONS.map(i => (
+                <button 
+                  key={i.id} 
+                  onClick={() => setIcon(i.id)}
+                  className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${icon === i.id ? 'bg-purple-500 text-white scale-110 shadow-lg' : 'bg-white text-slate-400 hover:bg-purple-50'}`}
+                >
+                  {i.icon}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-10 flex gap-4">
+          <button onClick={onClose} className="flex-1 py-5 bg-slate-100 text-slate-500 rounded-3xl font-black text-lg hover:bg-slate-200 transition">HỦY</button>
+          <button 
+            disabled={!label}
+            onClick={() => onSave({ label, type, icon })} 
+            className={`flex-[2] py-5 rounded-3xl font-black text-lg shadow-xl transition-all transform active:scale-95 ${label ? 'bg-purple-500 text-white hover:bg-purple-600' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+          >
+            TẠO TRẠM NGAY
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const EditNodeModal = ({ node, onSave, onClose }) => {
+  const [label, setLabel] = useState(node.label || "");
+  const [type, setType] = useState(node.type || "vocab");
+  const [icon, setIcon] = useState(node.icon || "book");
+  const [videoUrl, setVideoUrl] = useState(node.videoUrl || "");
+  const [vocabList, setVocabList] = useState(node.content || []);
+
+  const nodeTypes = [
+    { id: 'vocab', name: 'Từ Vựng', desc: 'Học từ qua Flashcard' },
+    { id: 'video', name: 'Video', desc: 'Xem bài giảng video' },
+    { id: 'game1', name: 'Trò Chơi', desc: 'Luyện tập vui nhộn' },
+    { id: 'summary', name: 'Tổng Kết', desc: 'Về đích & Khen thưởng' },
+  ];
+
+  const addVocab = () => {
+    setVocabList([...vocabList, { word: "", meaning: "", image: "https://picsum.photos/seed/abc/200/200", audio: "" }]);
+  };
+
+  const updateVocab = (index, field, value) => {
+    const newList = [...vocabList];
+    newList[index][field] = value;
+    setVocabList(newList);
+  };
+
+  const removeVocab = (index) => {
+    setVocabList(vocabList.filter((_, i) => i !== index));
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fadeIn overflow-y-auto">
+      <div className="bg-white rounded-[40px] p-8 w-full max-w-3xl shadow-3xl border-8 border-white my-8">
+        <div className="flex items-center justify-between mb-8">
+          <h3 className="text-3xl font-black text-slate-800 flex items-center gap-3">
+            <div className="p-3 bg-orange-100 rounded-2xl text-orange-500"><Settings size={32} strokeWidth={3}/></div>
+            Chỉnh Sửa Trạm
+          </h3>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition"><X size={32} className="text-slate-400" /></button>
+        </div>
+        
+        <div className="space-y-8 max-h-[60vh] overflow-y-auto pr-4 custom-scrollbar">
+          {/* Tên & Loại */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Tên trạm</label>
+              <input 
+                className="w-full border-4 border-slate-100 p-4 rounded-2xl focus:border-orange-400 outline-none font-bold text-lg text-slate-700 bg-slate-50 transition-all" 
+                value={label} 
+                onChange={e => setLabel(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Loại hoạt động</label>
+              <select 
+                className="w-full border-4 border-slate-100 p-4 rounded-2xl focus:border-orange-400 outline-none font-bold text-lg text-slate-700 bg-slate-50 transition-all appearance-none"
+                value={type}
+                onChange={e => setType(e.target.value)}
+              >
+                {nodeTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Chọn Icon */}
+          <div>
+            <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Biểu tượng hiển thị</label>
+            <div className="flex flex-wrap gap-2 p-3 bg-slate-50 rounded-2xl border-4 border-slate-100">
+              {AVAILABLE_ICONS.map(i => (
+                <button 
+                  key={i.id} 
+                  onClick={() => setIcon(i.id)}
+                  className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${icon === i.id ? 'bg-orange-500 text-white scale-110 shadow-lg' : 'bg-white text-slate-400 hover:bg-orange-50'}`}
+                >
+                  {i.icon}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Nội dung chi tiết dựa trên loại */}
+          <div className="pt-6 border-t-4 border-slate-50">
+            {type === 'vocab' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between mb-4">
+                  <label className="text-sm font-black text-slate-800 uppercase tracking-widest">Danh sách từ vựng</label>
+                  <button onClick={addVocab} className="px-4 py-2 bg-green-500 text-white rounded-xl font-bold text-xs hover:bg-green-600 transition flex items-center gap-2">
+                    <Plus size={16} /> THÊM TỪ
+                  </button>
+                </div>
+                {vocabList.map((item, idx) => (
+                  <div key={idx} className="p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 flex flex-wrap gap-3 items-end relative">
+                    <button onClick={() => removeVocab(idx)} className="absolute -top-2 -right-2 w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center shadow-md hover:bg-red-600 transition">
+                      <Trash2 size={14} />
+                    </button>
+                    <div className="flex-1 min-w-[150px]">
+                      <label className="block text-[10px] font-black text-slate-400 mb-1">Từ tiếng Anh</label>
+                      <input className="w-full p-2 rounded-lg border-2 border-slate-200 outline-none focus:border-orange-400 font-bold" value={item.word} onChange={e => updateVocab(idx, 'word', e.target.value)} />
+                    </div>
+                    <div className="flex-1 min-w-[150px]">
+                      <label className="block text-[10px] font-black text-slate-400 mb-1">Nghĩa tiếng Việt</label>
+                      <input className="w-full p-2 rounded-lg border-2 border-slate-200 outline-none focus:border-orange-400 font-bold" value={item.meaning} onChange={updateVocab.bind(null, idx, 'meaning', e => e.target.value)} />
+                    </div>
+                    <div className="flex-1 min-w-[150px]">
+                      <label className="block text-[10px] font-black text-slate-400 mb-1">Link ảnh</label>
+                      <input className="w-full p-2 rounded-lg border-2 border-slate-200 outline-none focus:border-orange-400 text-xs" value={item.image} onChange={e => updateVocab(idx, 'image', e.target.value)} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {type === 'video' && (
+              <div>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Đường dẫn Video (YouTube Embed)</label>
+                <input 
+                  className="w-full border-4 border-slate-100 p-4 rounded-2xl focus:border-orange-400 outline-none font-bold text-slate-700 bg-slate-50 transition-all" 
+                  value={videoUrl} 
+                  onChange={e => setVideoUrl(e.target.value)}
+                  placeholder="https://www.youtube.com/embed/..."
+                />
+                <p className="mt-2 text-xs text-slate-400 italic">Lưu ý: Sử dụng link dạng 'embed' để video hiển thị đúng.</p>
+              </div>
+            )}
+
+            {(type === 'game1' || type === 'summary') && (
+              <div className="p-8 bg-slate-50 rounded-3xl border-4 border-dashed border-slate-200 text-center">
+                <p className="text-slate-400 font-bold">Loại trạm này sử dụng cấu trúc mặc định.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-10 flex gap-4">
+          <button onClick={onClose} className="flex-1 py-5 bg-slate-100 text-slate-500 rounded-3xl font-black text-lg hover:bg-slate-200 transition">HỦY</button>
+          <button 
+            onClick={() => onSave({ ...node, label, type, icon, videoUrl, content: vocabList })} 
+            className="flex-[2] py-5 bg-orange-500 text-white rounded-3xl font-black text-lg shadow-xl hover:bg-orange-600 transition transform active:scale-95"
+          >
+            LƯU THAY ĐỔI
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AddLectureModal = ({ onSave, onClose }) => {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fadeIn">
+      <div className="bg-white rounded-[40px] p-10 w-full max-w-2xl shadow-3xl border-8 border-white">
+        <div className="flex items-center gap-4 mb-8">
+          <div className="p-4 bg-sky-100 rounded-3xl text-sky-500">
+            <BookOpen size={40} strokeWidth={2.5}/>
+          </div>
+          <div>
+            <h3 className="text-4xl font-black text-slate-800">Tạo Bài Học Mới</h3>
+            <p className="text-slate-400 font-bold">Thiết lập thông tin cho hành trình mới</p>
+          </div>
+        </div>
+        
+        <div className="space-y-8">
+          <div>
+            <label className="block text-sm font-black text-slate-400 uppercase tracking-[0.2em] mb-3 ml-2">Tên bài học</label>
+            <input 
+              autoFocus
+              className="w-full border-4 border-slate-100 p-6 rounded-[30px] focus:border-sky-400 outline-none font-black text-2xl text-slate-700 bg-slate-50 transition-all placeholder:text-slate-300" 
+              value={title} 
+              onChange={e => setTitle(e.target.value)}
+              placeholder="Nhập tên bài học..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-black text-slate-400 uppercase tracking-[0.2em] mb-3 ml-2">Nội dung bài học</label>
+            <textarea 
+              className="w-full border-4 border-slate-100 p-6 rounded-[30px] focus:border-sky-400 outline-none font-bold text-xl text-slate-700 bg-slate-50 transition-all h-40 resize-none placeholder:text-slate-300" 
+              value={description} 
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Mô tả ngắn gọn nội dung bài học này là gì..."
+            />
+          </div>
+        </div>
+
+        <div className="mt-12 flex gap-6">
+          <button 
+            onClick={onClose} 
+            className="flex-1 py-6 bg-slate-100 text-slate-500 rounded-[30px] font-black text-xl hover:bg-slate-200 transition-all active:scale-95"
+          >
+            HỦY BỎ
+          </button>
+          <button 
+            disabled={!title}
+            onClick={() => onSave({ title, description })} 
+            className={`flex-[2] py-6 rounded-[30px] font-black text-xl shadow-2xl transition-all transform active:scale-95 ${title ? 'bg-sky-500 text-white hover:bg-sky-600 shadow-sky-200' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+          >
+            TẠO BÀI HỌC NGAY
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ConfirmDeleteLectureModal = ({ title, onConfirm, onClose }) => (
+  <motion.div 
+    initial={{ opacity: 0 }}
+    animate={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4"
+  >
+    <motion.div 
+      initial={{ scale: 0.9, y: 20 }}
+      animate={{ scale: 1, y: 0 }}
+      exit={{ scale: 0.9, y: 20 }}
+      className="bg-white rounded-[50px] p-12 w-full max-w-lg shadow-3xl border-8 border-red-50 text-center"
+    >
+      <div className="w-24 h-24 bg-red-100 text-red-500 rounded-[35px] flex items-center justify-center mx-auto mb-8 shadow-inner">
+        <Trash2 size={48} strokeWidth={2.5} />
+      </div>
+      <h3 className="text-4xl font-black text-slate-800 mb-4">Xác nhận xóa?</h3>
+      <p className="text-slate-500 font-bold text-xl mb-10 leading-relaxed">
+        Bạn có chắc muốn xoá bài học <span className="text-red-500">"{title}"</span> này không?
+      </p>
+      <div className="flex gap-4">
+        <button 
+          onClick={onClose} 
+          className="flex-1 py-5 bg-slate-100 text-slate-500 rounded-3xl font-black text-lg hover:bg-slate-200 transition-all active:scale-95"
+        >
+          KHÔNG, QUAY LẠI
+        </button>
+        <button 
+          onClick={onConfirm} 
+          className="flex-1 py-5 bg-red-500 text-white rounded-3xl font-black text-lg shadow-xl hover:bg-red-600 transition-all transform active:scale-95 shadow-red-200"
+        >
+          CÓ, XÓA BÀI
+        </button>
+      </div>
+    </motion.div>
+  </motion.div>
+);
+
+const ConfirmDeleteNodeModal = ({ label, onClose, onConfirm }) => (
+  <motion.div 
+    initial={{ opacity: 0 }}
+    animate={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4"
+  >
+    <motion.div 
+      initial={{ scale: 0.9, y: 20 }}
+      animate={{ scale: 1, y: 0 }}
+      exit={{ scale: 0.9, y: 20 }}
+      className="bg-white rounded-[50px] p-12 w-full max-w-lg shadow-3xl border-8 border-red-50 text-center"
+    >
+      <div className="w-24 h-24 bg-red-100 text-red-500 rounded-[35px] flex items-center justify-center mx-auto mb-8 shadow-inner">
+        <Trash2 size={48} strokeWidth={2.5} />
+      </div>
+      <h3 className="text-4xl font-black text-slate-800 mb-4">Xác nhận xóa?</h3>
+      <p className="text-slate-500 font-bold text-xl mb-10 leading-relaxed">
+        Bạn có chắc muốn xoá trạm <span className="text-red-500">"{label}"</span> này không? Tất cả nội dung bên trong sẽ mất!
+      </p>
+      <div className="flex gap-4">
+        <button 
+          onClick={onClose} 
+          className="flex-1 py-5 bg-slate-100 text-slate-500 rounded-3xl font-black text-lg hover:bg-slate-200 transition-all active:scale-95"
+        >
+          KHÔNG, QUAY LẠI
+        </button>
+        <button 
+          onClick={onConfirm} 
+          className="flex-1 py-5 bg-red-500 text-white rounded-3xl font-black text-lg shadow-xl hover:bg-red-600 transition-all transform active:scale-95 shadow-red-200"
+        >
+          CÓ, XÓA TRẠM
+        </button>
+      </div>
+    </motion.div>
+  </motion.div>
+);
+
 // --- MAIN APP ---
 
 export default function App() {
@@ -520,8 +963,19 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [adminMode, setAdminMode] = useState('view');
   const [editingNode, setEditingNode] = useState(null);
+  const [isEditingPath, setIsEditingPath] = useState(false);
+  const [isAddingNode, setIsAddingNode] = useState(false);
+  const [isAddingLecture, setIsAddingLecture] = useState(false);
+  const [deletingLectureId, setDeletingLectureId] = useState(null);
+  const [deletingNodeId, setDeletingNodeId] = useState(null);
+
+  // Check if we are on the admin path
+  const isAdminPath = typeof window !== 'undefined' && window.location.pathname === '/admin';
 
   useEffect(() => {
+    // If we are on /admin, default to structure mode if user logs in as admin
+    if (isAdminPath) setAdminMode('structure');
+    
     // Mock data for initial preview if Firebase is not connected
     setLectures(INITIAL_LECTURES_SEED);
     setLoading(false);
@@ -531,7 +985,10 @@ export default function App() {
       const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'lectures'), orderBy('createdAt', 'desc'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        if (data.length > 0) setLectures(data);
+        if (data.length > 0) {
+          setLectures(data);
+          if (!activeLectureId) setActiveLectureId(data[0].id);
+        }
       });
       return () => unsubscribe();
     }
@@ -539,7 +996,91 @@ export default function App() {
 
   const activeLecture = lectures.find(l => l.id === activeLectureId);
 
-  if (!user) return <AuthScreen onLogin={(role) => setUser({ role })} isConnecting={loading} />;
+  const handleAddLecture = async (data) => {
+    const newLecture = {
+      title: data.title,
+      description: data.description,
+      nodes: [
+        { id: 'n1', type: 'vocab', label: 'Khởi động', icon: 'book', top: 80, left: 15, content: [] }
+      ],
+      pathData: "M 50 350 C 150 200, 250 500, 350 400 C 450 300, 550 100, 650 250 C 750 400, 850 550, 950 450",
+      createdAt: serverTimestamp ? serverTimestamp() : new Date().toISOString()
+    };
+
+    if (db && firebaseConfig.apiKey !== "placeholder") {
+      const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'lectures'), newLecture);
+      setActiveLectureId(docRef.id);
+    } else {
+      const id = `l${Date.now()}`;
+      const updated = [{ id, ...newLecture }, ...lectures];
+      setLectures(updated);
+      setActiveLectureId(id);
+    }
+    setIsAddingLecture(false);
+  };
+
+  const confirmDeleteLecture = async () => {
+    if (!deletingLectureId) return;
+    
+    if (db && firebaseConfig.apiKey !== "placeholder") {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'lectures', deletingLectureId));
+    }
+    
+    const updated = lectures.filter(l => l.id !== deletingLectureId);
+    setLectures(updated);
+    if (activeLectureId === deletingLectureId) {
+      setActiveLectureId(updated.length > 0 ? updated[0].id : null);
+    }
+    setDeletingLectureId(null);
+  };
+
+  const handleUpdateLecture = (updatedLecture) => {
+    const updated = lectures.map(l => l.id === updatedLecture.id ? updatedLecture : l);
+    setLectures(updated);
+    
+    // Sync to Firebase
+    if (db && firebaseConfig.apiKey !== "placeholder") {
+      updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'lectures', updatedLecture.id), updatedLecture);
+    }
+  };
+
+  const handleUpdateNode = (updatedNode) => {
+    const updatedNodes = activeLecture.nodes.map(n => n.id === updatedNode.id ? updatedNode : n);
+    handleUpdateLecture({ ...activeLecture, nodes: updatedNodes });
+    setEditingNode(null);
+  };
+
+  const handleDeleteNode = (nodeId) => {
+    setDeletingNodeId(nodeId);
+  };
+
+  const confirmDeleteNode = () => {
+    if (!deletingNodeId || !activeLecture) return;
+    const updatedNodes = activeLecture.nodes.filter(n => n.id !== deletingNodeId);
+    handleUpdateLecture({ ...activeLecture, nodes: updatedNodes });
+    setDeletingNodeId(null);
+  };
+
+  const handleAddNode = (nodeData) => {
+    const newNode = { 
+      id: `n${Date.now()}`, 
+      ...nodeData,
+      top: 50, 
+      left: 50, 
+      content: nodeData.type === 'vocab' ? [] : undefined,
+      videoUrl: nodeData.type === 'video' ? '' : undefined
+    };
+    const updatedNodes = [...(activeLecture.nodes || []), newNode];
+    const updated = lectures.map(l => l.id === activeLectureId ? { ...l, nodes: updatedNodes } : l);
+    setLectures(updated);
+    setIsAddingNode(false);
+
+    if (db && firebaseConfig.apiKey !== "placeholder") {
+      updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'lectures', activeLectureId), { nodes: updatedNodes });
+    }
+  };
+
+  if (!user) return <AuthScreen onLogin={(role) => setUser({ role })} isConnecting={loading} isAdminPath={isAdminPath} />;
 
   return (
     <div className="h-screen bg-sky-50 flex flex-col font-sans overflow-hidden">
@@ -625,11 +1166,13 @@ export default function App() {
                 
                 {user.role === 'admin' && adminMode === 'structure' && (
                   <div className="flex gap-2">
-                    <button onClick={() => {
-                      const newNode = { id: `n${Date.now()}`, type: 'vocab', label: 'Trạm Mới', icon: 'book', top: 50, left: 50, content: [] };
-                      const updated = lectures.map(l => l.id === activeLectureId ? { ...l, nodes: [...l.nodes, newNode] } : l);
-                      setLectures(updated);
-                    }} className="bg-purple-500 text-white px-6 py-2 rounded-2xl font-black shadow-lg flex items-center gap-2"><Plus size={20}/> THÊM TRẠM</button>
+                    <button 
+                      onClick={() => setIsEditingPath(true)}
+                      className="bg-sky-500 text-white px-6 py-2 rounded-2xl font-black shadow-lg flex items-center gap-2 hover:bg-sky-600 transition"
+                    >
+                      <MapIcon size={20}/> SỬA ĐƯỜNG ĐUA
+                    </button>
+                    <button onClick={() => setIsAddingNode(true)} className="bg-purple-500 text-white px-6 py-2 rounded-2xl font-black shadow-lg flex items-center gap-2 hover:bg-purple-600 transition"><Plus size={20}/> THÊM TRẠM</button>
                   </div>
                 )}
               </div>
@@ -639,7 +1182,8 @@ export default function App() {
                   lecture={activeLecture}
                   isAdmin={user.role === 'admin'}
                   isStructureMode={adminMode === 'structure'}
-                  onNodeClick={(n) => setActiveNode(n)}
+                  onNodeClick={(n, isEdit) => isEdit ? setEditingNode(n) : setActiveNode(n)}
+                  onDeleteNode={handleDeleteNode}
                   onUpdateLecture={(f, v) => {
                     const updated = lectures.map(l => l.id === activeLectureId ? { ...l, [f]: v } : l);
                     setLectures(updated);
@@ -655,6 +1199,57 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
+
+      {/* Modals */}
+      <AnimatePresence>
+        {isEditingPath && (
+          <PathEditorModal 
+            pathData={activeLecture.pathData}
+            onClose={() => setIsEditingPath(false)}
+            onSave={(newData) => {
+              const updated = lectures.map(l => l.id === activeLectureId ? { ...l, pathData: newData } : l);
+              setLectures(updated);
+              setIsEditingPath(false);
+              if (db && firebaseConfig.apiKey !== "placeholder") {
+                updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'lectures', activeLectureId), { pathData: newData });
+              }
+            }}
+          />
+        )}
+        {isAddingNode && (
+          <AddNodeModal 
+            onClose={() => setIsAddingNode(false)}
+            onSave={handleAddNode}
+          />
+        )}
+        {editingNode && (
+          <EditNodeModal 
+            node={editingNode}
+            onClose={() => setEditingNode(null)}
+            onSave={handleUpdateNode}
+          />
+        )}
+        {isAddingLecture && (
+          <AddLectureModal 
+            onClose={() => setIsAddingLecture(false)}
+            onSave={handleAddLecture}
+          />
+        )}
+        {deletingLectureId && (
+          <ConfirmDeleteLectureModal 
+            title={lectures.find(l => l.id === deletingLectureId)?.title}
+            onClose={() => setDeletingLectureId(null)}
+            onConfirm={confirmDeleteLecture}
+          />
+        )}
+        {deletingNodeId && (
+          <ConfirmDeleteNodeModal 
+            label={activeLecture?.nodes?.find(n => n.id === deletingNodeId)?.label}
+            onClose={() => setDeletingNodeId(null)}
+            onConfirm={confirmDeleteNode}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Module Overlay */}
       <AnimatePresence>
