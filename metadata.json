@@ -1,0 +1,7 @@
+{
+  "name": "English Adventure",
+  "description": "Ứng dụng học tiếng Anh vui nhộn dành cho học sinh tiểu học với bản đồ hành trình và trò chơi tương tác.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
