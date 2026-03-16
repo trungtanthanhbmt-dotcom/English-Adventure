@@ -87,7 +87,7 @@ const INITIAL_LECTURES_SEED = [
 
 // --- COMPONENTS ---
 
-const AuthScreen = ({ onLogin, isConnecting, isAdminPath }) => (
+const AuthScreen = ({ onLogin, isConnecting, isAdminPath, onToggleAdmin }) => (
   <div className="flex flex-col items-center justify-center h-screen bg-sky-400 relative overflow-hidden">
     {/* Decorative Clouds */}
     <motion.div animate={{ x: [0, 50, 0] }} transition={{ duration: 10, repeat: Infinity }} className="absolute top-20 left-10 text-white/40"><Cloud size={100} fill="currentColor" /></motion.div>
@@ -114,16 +114,24 @@ const AuthScreen = ({ onLogin, isConnecting, isAdminPath }) => (
       ) : (
         <div className="space-y-4">
           {!isAdminPath ? (
-            <button 
-              onClick={() => onLogin('student')}
-              className="w-full group flex items-center gap-4 p-5 bg-sky-500 hover:bg-sky-600 text-white rounded-2xl transition-all shadow-lg hover:shadow-sky-200 transform hover:-translate-y-1"
-            >
-              <div className="p-3 bg-white/20 rounded-xl"><User size={28} /></div>
-              <div className="text-left">
-                <span className="block font-black text-xl">Bắt Đầu Học</span>
-                <span className="text-sm opacity-80">Dành cho học sinh</span>
-              </div>
-            </button>
+            <>
+              <button 
+                onClick={() => onLogin('student')}
+                className="w-full group flex items-center gap-4 p-5 bg-sky-500 hover:bg-sky-600 text-white rounded-2xl transition-all shadow-lg hover:shadow-sky-200 transform hover:-translate-y-1"
+              >
+                <div className="p-3 bg-white/20 rounded-xl"><User size={28} /></div>
+                <div className="text-left">
+                  <span className="block font-black text-xl">Bắt Đầu Học</span>
+                  <span className="text-sm opacity-80">Dành cho học sinh</span>
+                </div>
+              </button>
+              <button 
+                onClick={onToggleAdmin}
+                className="mt-4 text-slate-400 text-sm font-bold hover:text-sky-500 transition underline decoration-2 underline-offset-4"
+              >
+                Đăng nhập dành cho Giáo viên
+              </button>
+            </>
           ) : (
             <>
               <button 
@@ -136,7 +144,12 @@ const AuthScreen = ({ onLogin, isConnecting, isAdminPath }) => (
                   <span className="text-sm opacity-80">Quản lý bài học</span>
                 </div>
               </button>
-              <a href="/" className="inline-block mt-4 text-slate-400 font-bold hover:text-sky-500 transition underline decoration-2 underline-offset-4">Quay lại trang học sinh</a>
+              <button 
+                onClick={onToggleAdmin}
+                className="inline-block mt-4 text-slate-400 font-bold hover:text-sky-500 transition underline decoration-2 underline-offset-4"
+              >
+                Quay lại trang học sinh
+              </button>
             </>
           )}
         </div>
@@ -970,7 +983,8 @@ export default function App() {
   const [deletingNodeId, setDeletingNodeId] = useState(null);
 
   // Check if we are on the admin path
-  const isAdminPath = typeof window !== 'undefined' && window.location.pathname === '/admin';
+  const [showAdminLogin, setShowAdminLogin] = useState(typeof window !== 'undefined' && (window.location.pathname === '/admin' || window.location.pathname === '/admin/'));
+  const isAdminPath = showAdminLogin;
 
   useEffect(() => {
     // If we are on /admin, default to structure mode if user logs in as admin
@@ -1080,7 +1094,7 @@ export default function App() {
     }
   };
 
-  if (!user) return <AuthScreen onLogin={(role) => setUser({ role })} isConnecting={loading} isAdminPath={isAdminPath} />;
+  if (!user) return <AuthScreen onLogin={(role) => setUser({ role })} isConnecting={loading} isAdminPath={isAdminPath} onToggleAdmin={() => setShowAdminLogin(!showAdminLogin)} />;
 
   return (
     <div className="h-screen bg-sky-50 flex flex-col font-sans overflow-hidden">
